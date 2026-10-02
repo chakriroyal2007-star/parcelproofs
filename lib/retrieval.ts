@@ -4,15 +4,23 @@ import { db, mode, orderSources, policies } from './db';
 import type { Order, Source, Passage } from './types';
 
 export function getApiKey(): string | undefined {
-  return process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+  return process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+}
+
+export function isGemini(): boolean {
+  return !!process.env.GEMINI_API_KEY;
 }
 
 export function isOpenRouter(): boolean {
+  if (isGemini()) return false;
   const key = getApiKey();
   return !!(process.env.OPENROUTER_API_KEY || (key && key.startsWith('sk-or-v1-')));
 }
 
 export function getModel(): string {
+  if (isGemini()) {
+    return process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+  }
   if (isOpenRouter()) {
     return process.env.OPENROUTER_MODEL || (process.env.OPENAI_MODEL?.includes('/') ? process.env.OPENAI_MODEL : 'openai/gpt-4o-mini');
   }
@@ -22,7 +30,16 @@ export function getModel(): string {
 export function client() {
   const key = getApiKey();
   if (!key) {
-    throw new Error('Live mode needs OPENROUTER_API_KEY or OPENAI_API_KEY in environment.');
+    throw new Error('Live mode needs GEMINI_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in environment.');
+  }
+
+  if (isGemini()) {
+    return new OpenAI({
+      apiKey: key,
+      baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+      timeout: 60000,
+      maxRetries: 2
+    });
   }
 
   if (isOpenRouter()) {

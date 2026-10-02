@@ -25,7 +25,7 @@ import {
   ChevronRight,
   X
 } from 'lucide-react';
-import type { Order, Source, User, Audit, CaseData } from '@/lib/types';
+import type { Order, Source, User, Audit, CaseData, AdminIntakeReport } from '@/lib/types';
 
 const date = (s: string) => new Date(s).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
 const money = (o: Order) => new Intl.NumberFormat('en-US', { style: 'currency', currency: o.currency }).format(o.amount);
@@ -41,6 +41,7 @@ interface AdminData {
   orders: Order[];
   policies: Source[];
   agents: { id: string; name: string; email: string; status: string; activeCases: number; resolvedCases: number; assignedCases: string[] }[];
+  intakeReports?: AdminIntakeReport[];
 }
 
 export default function AdminPortal() {
@@ -52,10 +53,13 @@ export default function AdminPortal() {
 const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [data, setData] = useState<AdminData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'cases' | 'agents' | 'policies' | 'audit'>('overview');
+  const [tab, setTab] = useState<'overview' | 'cases' | 'intake' | 'agents' | 'policies' | 'audit'>('overview');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   
+  // Selected report modal for full breakdown inspection
+  const [viewingReport, setViewingReport] = useState<AdminIntakeReport | null>(null);
+
   // Selected case modal for deep inspection
   const [inspectingCaseId, setInspectingCaseId] = useState<string | null>(null);
   const [caseDetails, setCaseDetails] = useState<CaseData | null>(null);
@@ -164,6 +168,9 @@ const [currentUser, setCurrentUser] = useState<User | null>(null);
           <nav suppressHydrationWarning className="portal-nav">
             <button className={`portal-nav-btn ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>Overview</button>
             <button className={`portal-nav-btn ${tab === 'cases' ? 'active' : ''}`} onClick={() => setTab('cases')}>Cases</button>
+            <button className={`portal-nav-btn ${tab === 'intake' ? 'active' : ''}`} onClick={() => setTab('intake')}>
+              AI Intake Reports {(data?.intakeReports?.length || 0) > 0 && <span style={{ marginLeft: 6, padding: '1px 6px', borderRadius: '10px', background: 'var(--blue)', color: '#fff', fontSize: '11px' }}>{data?.intakeReports?.length}</span>}
+            </button>
             <button className={`portal-nav-btn ${tab === 'agents' ? 'active' : ''}`} onClick={() => setTab('agents')}>Agents</button>
             <button className={`portal-nav-btn ${tab === 'policies' ? 'active' : ''}`} onClick={() => setTab('policies')}>Policies</button>
             <button className={`portal-nav-btn ${tab === 'audit' ? 'active' : ''}`} onClick={() => setTab('audit')}>Audit Trail</button>
@@ -223,6 +230,15 @@ const [currentUser, setCurrentUser] = useState<User | null>(null);
                     <span className="stat-label">Approved Refund Actions</span>
                     <span className="stat-value text-green">{data?.initiatedRefunds || 0}</span>
                     <span className="stat-sub">Simulated human-approved actions</span>
+                  </div>
+                  <div suppressHydrationWarning className="stat-box" style={{ cursor: 'pointer', borderLeft: '3px solid var(--blue)' }} onClick={() => setTab('intake')}>
+                    <span className="stat-label">AI Intake Reports</span>
+                    <span className="stat-value text-blue">{data?.intakeReports?.length || 0}</span>
+                    <span className="stat-sub">
+                      {data?.intakeReports && data.intakeReports.length > 0 
+                        ? `Avg Conf: ${Math.round(data.intakeReports.reduce((acc, r) => acc + r.confidenceScore, 0) / data.intakeReports.length)}%` 
+                        : 'Customer Q&A reports'}
+                    </span>
                   </div>
                 </div>
 
@@ -386,6 +402,102 @@ const [currentUser, setCurrentUser] = useState<User | null>(null);
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {/* AI INTAKE REPORTS TAB */}
+            {tab === 'intake' && (
+              <div suppressHydrationWarning className="portal-card">
+                <div suppressHydrationWarning className="card-header">
+                  <div suppressHydrationWarning className="card-title-group">
+                    <Sparkles size={16} style={{ color: 'var(--blue)' }} />
+                    <div>
+                      <h3>AI Dispute Intake & Investigation Reports</h3>
+                      <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                        Automated scenario-adaptive customer interviews synthesized with carrier telemetry and multi-factor confidence scoring.
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
+                    <span className="badge success">
+                      {data?.intakeReports?.length || 0} Reports Recorded
+                    </span>
+                  </div>
+                </div>
+
+                {(!data?.intakeReports || data.intakeReports.length === 0) ? (
+                  <div suppressHydrationWarning className="portal-empty-state" style={{ padding: 'var(--s8) var(--s4)' }}>
+                    <MessageSquare size={32} style={{ color: 'var(--muted)', margin: '0 auto var(--s2)' }} />
+                    <p style={{ fontWeight: 600 }}>No Customer Intake Reports Submitted Yet</p>
+                    <p style={{ fontSize: '12px', color: 'var(--muted)', maxWidth: 450 }}>
+                      When customers chat with the AI Dispute Assistant in the Customer Portal and submit their answers, detailed investigation reports with confidence scores will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  <div suppressHydrationWarning className="card-body p-0">
+                    <table className="portal-table">
+                      <thead>
+                        <tr>
+                          <th>Case ID</th>
+                          <th>Customer & Account</th>
+                          <th>Disputed Item</th>
+                          <th>AI Confidence Score</th>
+                          <th>Recommendation</th>
+                          <th>Questions Asked</th>
+                          <th>Submitted</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.intakeReports.map(rep => {
+                          const confClass = rep.confidenceLevel === 'HIGH' 
+                            ? 'confidence-high' 
+                            : (rep.confidenceLevel === 'MEDIUM' ? 'confidence-medium' : 'confidence-low');
+                          return (
+                            <tr key={rep.reportId}>
+                              <td>
+                                <strong className="font-mono text-xs">{rep.caseId}</strong>
+                              </td>
+                              <td>
+                                <div>
+                                  <span style={{ fontWeight: 600 }}>{rep.customerName}</span>
+                                  <small style={{ display: 'block', color: 'var(--muted)' }}>{rep.accountId}</small>
+                                </div>
+                              </td>
+                              <td>
+                                <div>
+                                  <span>{rep.orderItem}</span>
+                                  <small style={{ display: 'block', color: 'var(--muted)' }}>{rep.currency} {rep.orderAmount}</small>
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`confidence-score-chip ${confClass}`}>
+                                  <Sparkles size={11} /> {rep.confidenceScore}% {rep.confidenceLevel}
+                                </span>
+                              </td>
+                              <td>
+                                <span className={`status-pill ${rep.recommendedAction === 'FULL_REFUND' ? 'status-delivered' : 'status-disputed'}`}>
+                                  {rep.recommendedAction.replace('_', ' ')}
+                                </span>
+                              </td>
+                              <td className="text-center font-mono text-xs">
+                                {rep.questionsAskedCount} turns
+                              </td>
+                              <td className="text-xs text-sub">
+                                {new Date(rep.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td>
+                                <button className="portal-btn-sm" onClick={() => setViewingReport(rep)}>
+                                  View Full Report
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
@@ -582,6 +694,31 @@ const [currentUser, setCurrentUser] = useState<User | null>(null);
                       </div>
                     )}
                   </div>
+
+                  {caseDetails.intakeReport && (
+                    <div suppressHydrationWarning className="inspector-section" style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                        <h4 className="section-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Sparkles size={15} style={{ color: 'var(--blue)' }} /> Customer AI Intake Report & Confidence Score
+                        </h4>
+                        <span className={`confidence-score-chip ${caseDetails.intakeReport.confidenceLevel === 'HIGH' ? 'confidence-high' : 'confidence-medium'}`}>
+                          {caseDetails.intakeReport.confidenceScore}% {caseDetails.intakeReport.confidenceLevel} CONFIDENCE
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '13px', margin: '4px 0 8px 0', color: 'var(--ink)' }}>
+                        {caseDetails.intakeReport.executiveSummary}
+                      </p>
+                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--muted)', marginBottom: '8px' }}>
+                        <span>Consistency: <strong>{caseDetails.intakeReport.confidenceBreakdown.evidenceConsistency}%</strong></span>
+                        <span>Courier Conflict: <strong>{caseDetails.intakeReport.confidenceBreakdown.courierConflictIndex}%</strong></span>
+                        <span>Plausibility: <strong>{caseDetails.intakeReport.confidenceBreakdown.plausibilityScore}%</strong></span>
+                        <span>Recommendation: <strong style={{ color: 'var(--ink)' }}>{caseDetails.intakeReport.recommendedAction}</strong></span>
+                      </div>
+                      <button className="portal-btn-sm" onClick={() => setViewingReport(caseDetails.intakeReport!)}>
+                        Inspect Full Investigation Transcript ({caseDetails.intakeReport.questionsAskedCount} turns)
+                      </button>
+                    </div>
+                  )}
                 </div>
 
               ) : (
@@ -626,6 +763,135 @@ const [currentUser, setCurrentUser] = useState<User | null>(null);
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* FULL INTAKE REPORT MODAL */}
+      {viewingReport && (
+        <div suppressHydrationWarning className="report-modal-backdrop" onClick={() => setViewingReport(null)}>
+          <div suppressHydrationWarning className="report-modal" onClick={e => e.stopPropagation()}>
+            <div suppressHydrationWarning className="report-header">
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <span className="brand-tag brand-tag-admin">Official Dispute Reconstruction</span>
+                  <span className="font-mono text-xs text-sub">{viewingReport.reportId}</span>
+                </div>
+                <h3 style={{ margin: 0, fontSize: '20px' }}>
+                  Case {viewingReport.caseId} · Dispute Investigation Report
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--muted)' }}>
+                  Customer: <strong>{viewingReport.customerName}</strong> ({viewingReport.accountId}) · Item: <strong>{viewingReport.orderItem}</strong> ({viewingReport.currency} {viewingReport.orderAmount})
+                </p>
+              </div>
+              <button className="modal-close" onClick={() => setViewingReport(null)}><X size={18} /></button>
+            </div>
+
+            {/* CONFIDENCE SCORE GAUGE */}
+            <div suppressHydrationWarning className="report-section" style={{ background: '#fdfbf7', border: '1px solid #f0cc72' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', display: 'block', fontWeight: 700 }}>
+                    AI Overall Confidence Score
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                    <span style={{ fontSize: '32px', fontWeight: 800, color: viewingReport.confidenceScore >= 80 ? '#137333' : '#b06000' }}>
+                      {viewingReport.confidenceScore}%
+                    </span>
+                    <span className={`confidence-score-chip ${viewingReport.confidenceLevel === 'HIGH' ? 'confidence-high' : 'confidence-medium'}`}>
+                      {viewingReport.confidenceLevel} CONFIDENCE
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Evidence Consistency</span>
+                    <strong style={{ fontSize: '15px' }}>{viewingReport.confidenceBreakdown.evidenceConsistency}%</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Courier Conflict Index</span>
+                    <strong style={{ fontSize: '15px' }}>{viewingReport.confidenceBreakdown.courierConflictIndex}%</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Customer Plausibility</span>
+                    <strong style={{ fontSize: '15px' }}>{viewingReport.confidenceBreakdown.plausibilityScore}%</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* EXECUTIVE SYNOPSIS */}
+            <div suppressHydrationWarning className="report-section">
+              <h4><FileText size={15} /> Executive Synopsis</h4>
+              <p style={{ margin: 0, fontSize: '13.5px', lineHeight: 1.6, color: 'var(--ink)' }}>
+                {viewingReport.executiveSummary}
+              </p>
+            </div>
+
+            {/* EXTRACTED FACTS & CONTRADICTIONS */}
+            <div suppressHydrationWarning style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s3)' }}>
+              <div suppressHydrationWarning className="report-section">
+                <h4><CheckCircle2 size={15} style={{ color: 'var(--green)' }} /> Extracted Customer Statements</h4>
+                <ul className="report-tag-list">
+                  {viewingReport.extractedFacts.map((f, i) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div suppressHydrationWarning className="report-section">
+                <h4><AlertTriangle size={15} style={{ color: 'var(--amber)' }} /> Detected Discrepancies</h4>
+                {viewingReport.detectedContradictions.length > 0 ? (
+                  <ul className="report-tag-list">
+                    {viewingReport.detectedContradictions.map((c, i) => (
+                      <li key={i} style={{ color: '#b3311f' }}>{c}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p style={{ fontSize: '13px', color: 'var(--muted)' }}>No direct physical contradiction flagged.</p>
+                )}
+              </div>
+            </div>
+
+            {/* TELEMETRY & RECOMMENDATION */}
+            <div suppressHydrationWarning className="report-section">
+              <h4><ShieldCheck size={15} style={{ color: 'var(--blue)' }} /> Recommended Operational Action</h4>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <span className={`status-pill ${viewingReport.recommendedAction === 'FULL_REFUND' ? 'status-delivered' : 'status-disputed'}`} style={{ fontSize: '13px', padding: '4px 10px' }}>
+                  {viewingReport.recommendedAction.replace('_', ' ')}
+                </span>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  Evaluated under ParcelProof US Delivery Resolution Framework
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--ink)', lineHeight: 1.5 }}>
+                {viewingReport.actionRationale}
+              </p>
+            </div>
+
+            {/* COMPLETE INTERVIEW TRANSCRIPT */}
+            <div suppressHydrationWarning className="report-section">
+              <h4><MessageSquare size={15} /> Complete Investigation Interview Transcript ({viewingReport.questionsAskedCount} turns)</h4>
+              <div className="report-transcript-list" style={{ marginTop: '10px' }}>
+                {viewingReport.interviewTranscript.map((t, idx) => (
+                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div className="transcript-bubble q">
+                      <strong>AI Question {idx + 1}:</strong> {t.question}
+                    </div>
+                    <div className="transcript-bubble a">
+                      <strong>Customer Response:</strong> {t.answer}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--s2)' }}>
+              <button className="button primary" onClick={() => setViewingReport(null)}>
+                Close Report
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -23,9 +23,10 @@ import {
   ShoppingBag,
   MapPin,
   Camera,
-  CheckCircle
+  CheckCircle,
+  RefreshCw
 } from 'lucide-react';
-import type { Order, User, CustomerAIAnswer, AIChatMessage, Source, Product } from '@/lib/types';
+import type { Order, User, CustomerAIAnswer, AIChatMessage, Source, Product, IntakeTranscriptItem } from '@/lib/types';
 import { PRODUCTS } from '@/lib/products';
 
 export default function CustomerPortal() {
@@ -52,6 +53,16 @@ export default function CustomerPortal() {
   const [checkedNeighbors, setCheckedNeighbors] = useState('yes');
   const [photoDisputed, setPhotoDisputed] = useState('yes');
   const [notice, setNotice] = useState('');
+
+  // Dynamic AI Dispute Intake Assistant state
+  const [intakeSubmitted, setIntakeSubmitted] = useState<boolean>(false);
+  const [intakeSubmittedAt, setIntakeSubmittedAt] = useState<string | null>(null);
+  const [intakeTranscript, setIntakeTranscript] = useState<IntakeTranscriptItem[]>([]);
+  const [currentInvestigatorQuestion, setCurrentInvestigatorQuestion] = useState<string>('');
+  const [customerAnswerInput, setCustomerAnswerInput] = useState<string>('');
+  const [isIntakeLoading, setIsIntakeLoading] = useState<boolean>(false);
+  const [isInvestigationComplete, setIsInvestigationComplete] = useState<boolean>(false);
+  const [submittingReport, setSubmittingReport] = useState<boolean>(false);
 
   // Customer AI Assistant state
   const [aiQuestion, setAiQuestion] = useState('');
@@ -91,6 +102,8 @@ export default function CustomerPortal() {
       .catch(() => router.push('/login'));
   }, [router]);
 
+  const [caseTimeline, setCaseTimeline] = useState<any[]>([]);
+
   useEffect(() => {
     if (selectedCase) {
       loadCaseData(selectedCase);
@@ -113,8 +126,129 @@ export default function CustomerPortal() {
         if (d && d.sources) {
           setCaseSources(d.sources);
         }
+        if (d && d.timeline) {
+          setCaseTimeline(d.timeline);
+        }
       })
       .catch(() => {});
+  }
+
+  useEffect(() => {
+    if (selectedCase && tab === 'assistant') {
+      loadIntakeSession(selectedCase);
+    }
+  }, [selectedCase, tab]);
+
+  async function loadIntakeSession(caseId: string) {
+    if (!caseId) return;
+    setIsIntakeLoading(true);
+    try {
+      const res = await fetch(`/api/customer/intake?caseId=${caseId}`);
+      const data = await res.json();
+      if (data.isSubmitted) {
+        setIntakeSubmitted(true);
+        setIntakeSubmittedAt(data.submittedAt);
+      } else {
+        setIntakeSubmitted(false);
+        const initRes = await fetch('/api/customer/intake', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'initial', caseId })
+        });
+        const initData = await initRes.json();
+        if (initData.isSubmitted) {
+          setIntakeSubmitted(true);
+          setIntakeSubmittedAt(initData.submittedAt);
+        } else {
+          if (initData.transcript && initData.transcript.length > 0) {
+            setIntakeTranscript(initData.transcript);
+            setCurrentInvestigatorQuestion("Thank you for the details so far. Is there anything else you'd like to add before we submit the dispute evidence?");
+          } else {
+            setCurrentInvestigatorQuestion(initData.openingQuestion || 'Hello! I am your ParcelProof AI Dispute Investigator. Can you tell me what you noticed when you checked for your delivery?');
+          }
+          setIsInvestigationComplete(false);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load intake session:', e);
+    } finally {
+      setIsIntakeLoading(false);
+    }
+  }
+
+  async function handleSendIntakeAnswer(e?: React.FormEvent, customAnswer?: string) {
+    if (e) e.preventDefault();
+    const answer = (customAnswer || customerAnswerInput).trim();
+    if (!answer || !selectedCase || isIntakeLoading) return;
+
+    const newTurn: IntakeTranscriptItem = {
+      question: currentInvestigatorQuestion,
+      answer,
+      timestamp: new Date().toISOString()
+    };
+
+    const updatedTranscript = [...intakeTranscript, newTurn];
+    setIntakeTranscript(updatedTranscript);
+    setCustomerAnswerInput('');
+    setIsIntakeLoading(true);
+
+    try {
+      const res = await fetch('/api/customer/intake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'chat',
+          caseId: selectedCase,
+          message: answer,
+          transcript: updatedTranscript
+        })
+      });
+      const data = await res.json();
+      if (data.reply) {
+        setCurrentInvestigatorQuestion(data.reply);
+      }
+      if (data.isInvestigationComplete) {
+        setIsInvestigationComplete(true);
+      }
+    } catch {
+      setCurrentInvestigatorQuestion('Thank you. We have recorded your statement. You can now submit your responses for operational investigation.');
+      setIsInvestigationComplete(true);
+    } finally {
+      setIsIntakeLoading(false);
+    }
+  }
+
+  async function handleSubmitIntakeResponses() {
+    if (!selectedCase || intakeTranscript.length === 0 || submittingReport) return;
+    setSubmittingReport(true);
+    try {
+      const res = await fetch('/api/customer/intake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'submit',
+          caseId: selectedCase,
+          transcript: intakeTranscript
+        })
+      });
+      const data = await res.json();
+      if (data.success || data.status === 'submitted') {
+        setIntakeSubmitted(true);
+        setIntakeSubmittedAt(data.submittedAt || new Date().toISOString());
+      }
+    } catch {
+      setIntakeSubmitted(true);
+      setIntakeSubmittedAt(new Date().toISOString());
+    } finally {
+      setSubmittingReport(false);
+    }
+  }
+
+  function handleReopenIntake() {
+    setIntakeSubmitted(false);
+    setIntakeTranscript([]);
+    setIsInvestigationComplete(false);
+    if (selectedCase) loadIntakeSession(selectedCase);
   }
 
   function loadOrders() {
@@ -350,9 +484,6 @@ export default function CustomerPortal() {
         <button className={`portal-nav-btn ${tab === 'disputes' ? 'active' : ''}`} onClick={() => setTab('disputes')}>
           Active Disputes {disputedOrders.length > 0 && <span className="tab-count">{disputedOrders.length}</span>}
         </button>
-        <button className={`portal-nav-btn ${tab === 'assistant' ? 'active' : ''}`} onClick={() => setTab('assistant')}>
-          <Sparkles size={14} style={{ color: 'var(--accent)' }} /> AI Assistant
-        </button>
         <button className={`portal-nav-btn ${tab === 'profile' ? 'active' : ''}`} onClick={() => setTab('profile')}>
           Account Profile
         </button>
@@ -419,26 +550,11 @@ export default function CustomerPortal() {
                 <div suppressHydrationWarning className="portal-card">
                   <div suppressHydrationWarning className="section-title">
                     <div>
-                      <h3>Dispute AI Assistant</h3>
-                      <p>Live evidence-grounded dispute support.</p>
-                    </div>
-                    <Bot size={20} className="text-accent" />
-                  </div>
-
-                  <div suppressHydrationWarning className="quick-actions-bar" style={{ margin: 'var(--s3) 0' }}>
-                    <div suppressHydrationWarning className="quick-actions-chips">
-                      <button className="quick-chip" onClick={() => { setTab('assistant'); askCustomerAssistant("What is the current status of my dispute?"); }}>
-                        Status of my dispute?
-                      </button>
-                      <button className="quick-chip" onClick={() => { setTab('assistant'); askCustomerAssistant("Has my refund been initiated?"); }}>
-                        Has refund been initiated?
-                      </button>
+                      <h3>Customer Support</h3>
+                      <p>Need help with your orders?</p>
                     </div>
                   </div>
-
-                  <button className="button primary full" onClick={() => setTab('assistant')} style={{ marginTop: 'var(--s3)' }}>
-                    <MessageSquare size={15} /> Open Full AI Assistant Thread
-                  </button>
+                  <p style={{fontSize: 'var(--sm)', color: 'var(--text-muted)'}}>If you have an issue with an order, please go to My Orders and click 'Dispute' to start an investigation.</p>
                 </div>
               </aside>
             </div>
@@ -489,7 +605,7 @@ export default function CustomerPortal() {
                                 <button className="button secondary small" onClick={() => handleConfirmDelivery(o.id)}>
                                   <CheckCircle size={12} /> Confirm
                                 </button>
-                                <button className="button primary small" onClick={() => { setDisputeOrderId(o.id); setIsCreatingDispute(true); }}>
+                                <button className="button primary small" onClick={() => { setSelectedCase(o.id); setTab('assistant'); }}>
                                   Dispute
                                 </button>
                               </>
@@ -524,27 +640,22 @@ export default function CustomerPortal() {
                 <div suppressHydrationWarning className="timeline-section" style={{ margin: 'var(--s4) 0' }}>
                   <h3>Delivery Evidence & Recorded Statements</h3>
                   <div suppressHydrationWarning className="timeline-flow">
-                    <div suppressHydrationWarning className="timeline-item">
-                      <div className="timeline-marker complete"><Check size={12} /></div>
-                      <div className="timeline-content">
-                        <strong>Order Shipped & Dispatched</strong>
-                        <small>Carrier tracking generated</small>
-                      </div>
-                    </div>
-                    <div suppressHydrationWarning className="timeline-item">
-                      <div className="timeline-marker complete"><Truck size={12} /></div>
-                      <div className="timeline-content">
-                        <strong>Carrier Scan: Marked Delivered</strong>
-                        <small>Carrier reported delivery location photo</small>
-                      </div>
-                    </div>
-                    <div suppressHydrationWarning className="timeline-item">
-                      <div className="timeline-marker active"><AlertTriangle size={12} /></div>
-                      <div className="timeline-content">
-                        <strong>Customer Dispute Reported</strong>
-                        <small>Non-receipt & photo discrepancy logged</small>
-                      </div>
-                    </div>
+                    {caseTimeline && caseTimeline.length > 0 ? (
+                      caseTimeline.map(evt => (
+                        <div key={evt.id} suppressHydrationWarning className="timeline-item">
+                          <div className={`timeline-marker ${evt.badgeType === 'success' ? 'complete' : evt.badgeType === 'warning' ? 'active' : 'neutral'}`}>
+                            {evt.stage.includes('Decision') ? <AlertTriangle size={12} /> : evt.stage.includes('Delivery') ? <Truck size={12} /> : <Check size={12} />}
+                          </div>
+                          <div className="timeline-content">
+                            <strong>{evt.stage}</strong>
+                            <small>{evt.description}</small>
+                            <span className="timestamp">{new Date(evt.timestamp).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p>Loading timeline...</p>
+                    )}
                   </div>
                 </div>
 
@@ -574,117 +685,214 @@ export default function CustomerPortal() {
               <div suppressHydrationWarning className="section-title">
                 <div>
                   <h2>Customer AI Dispute Assistant</h2>
-                  <p>Authorized live dispute support · Grounded in persistent case records and RAG memory.</p>
+                  <p>Adaptive conversational inquiry · Grounded in carrier telemetry and dynamic scenario investigation.</p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
-                  <span className="badge success">Live RAG Connected</span>
+                  <span className={`badge ${intakeSubmitted ? 'success' : 'neutral'}`}>
+                    {intakeSubmitted ? 'Response Submitted' : 'Interactive Investigation'}
+                  </span>
                   <Bot size={22} className="text-accent" />
                 </div>
               </div>
 
-              {/* QUICK CHIP PROMPTS */}
-              <div suppressHydrationWarning className="quick-actions-bar">
-                <span className="quick-actions-title">Common Questions:</span>
-                <div suppressHydrationWarning className="quick-actions-chips">
-                  <button className="quick-chip" onClick={() => askCustomerAssistant("What is the current status of my dispute?")}>
-                    What is the current status of my dispute?
-                  </button>
-                  <button className="quick-chip" onClick={() => askCustomerAssistant("Has my refund been initiated in the ledger?")}>
-                    Has my refund been initiated?
-                  </button>
-                  <button className="quick-chip" onClick={() => askCustomerAssistant("Why was my order marked delivered if nobody came?")}>
-                    Why was my order marked delivered?
-                  </button>
-                  <button className="quick-chip" onClick={() => askCustomerAssistant("What are the next steps for my dispute?")}>
-                    What are the next steps?
-                  </button>
+              {/* CASE SELECTOR / BANNER */}
+              <div suppressHydrationWarning className="intake-banner">
+                <div suppressHydrationWarning className="intake-banner-left">
+                  <Package size={18} style={{ color: 'var(--blue)' }} />
+                  <div>
+                    <span style={{ fontSize: 'var(--xs)', color: 'var(--muted)', display: 'block' }}>Investigating Case:</span>
+                    <strong>{selectedCase}</strong> · {orders.find(o => o.id === selectedCase)?.item || 'Disputed Item'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Switch Order:</span>
+                  <select
+                    value={selectedCase || ''}
+                    onChange={e => setSelectedCase(e.target.value)}
+                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--line)', background: 'var(--white)', fontSize: '12px' }}
+                  >
+                    {orders.map(o => (
+                      <option key={o.id} value={o.id}>{o.id} - {o.item}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              {/* MULTI-TURN CHAT THREAD */}
-              <div suppressHydrationWarning className="chat-thread" style={{ minHeight: '280px', marginTop: 'var(--s4)' }}>
-                {chatHistory.length === 0 && !aiLoading && (
-                  <article className="chat-card-assistant">
-                    <div suppressHydrationWarning className="chat-assistant-header">
-                      <div suppressHydrationWarning className="chat-assistant-meta">
-                        <Bot size={16} /> <strong>ParcelProof Support Copilot</strong>
-                      </div>
-                      <span className="badge success">Authorized Customer View</span>
-                    </div>
-                    <div suppressHydrationWarning className="chat-answer-text">
-                      Hello! I am your AI dispute assistant for order <strong>{selectedCase}</strong>. Ask me any question regarding your package delivery status, carrier evidence, or refund review.
-                    </div>
-                  </article>
-                )}
+              {/* IF SUBMITTED: SHOW CLEAN "RESPONSE SUBMITTED" CONFIRMATION */}
+              {intakeSubmitted ? (
+                <div suppressHydrationWarning className="intake-submitted-view">
+                  <div suppressHydrationWarning className="intake-success-icon">
+                    <Check size={36} />
+                  </div>
+                  <h3 suppressHydrationWarning className="intake-submitted-title">Response Submitted</h3>
+                  <p suppressHydrationWarning className="intake-submitted-subtitle">
+                    Your dispute investigation responses for <strong>{selectedCase}</strong> have been securely submitted to our Dispute Operations team. Our specialists are reviewing your statements against carrier telemetry records.
+                  </p>
 
-                {chatHistory.map((msg, idx) => (
-                  <div key={msg.id || idx} className={`chat-message ${msg.role}`}>
-                    {msg.role === 'user' ? (
-                      <div className="chat-bubble-user">
-                        {msg.content}
+                  <div suppressHydrationWarning className="intake-timeline-card">
+                    <div suppressHydrationWarning className="intake-timeline-step">
+                      <div suppressHydrationWarning className="intake-step-icon done"><Check size={14} /></div>
+                      <div>
+                        <strong>1. Dispute Registered</strong>
+                        <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>Claim filed in ParcelProof dispute database</p>
                       </div>
-                    ) : (
-                      <article className="chat-card-assistant">
-                        <div suppressHydrationWarning className="chat-assistant-header">
-                          <div suppressHydrationWarning className="chat-assistant-meta">
-                            <Bot size={16} /> <strong>ParcelProof Support Copilot</strong>
-                            <small>· {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
-                          </div>
-                          <span className="badge success">Evidence Grounded</span>
+                    </div>
+                    <div suppressHydrationWarning className="intake-timeline-step">
+                      <div suppressHydrationWarning className="intake-step-icon done"><Check size={14} /></div>
+                      <div>
+                        <strong>2. AI Evidence Interview Submitted</strong>
+                        <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                          {intakeSubmittedAt ? `Submitted on ${new Date(intakeSubmittedAt).toLocaleString()}` : 'Submitted successfully'}
+                        </p>
+                      </div>
+                    </div>
+                    <div suppressHydrationWarning className="intake-timeline-step">
+                      <div suppressHydrationWarning className="intake-step-icon pending"><Clock3 size={14} /></div>
+                      <div>
+                        <strong>3. Operations Review & Resolution</strong>
+                        <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>Operations leadership evaluating carrier claim and refund eligibility</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div suppressHydrationWarning style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap', justifyContent: 'center' }}>
+                    <button className="button secondary" onClick={handleReopenIntake}>
+                      <RefreshCw size={14} /> Reopen or Provide Additional Details
+                    </button>
+                    <button className="button primary" onClick={() => setTab('orders')}>
+                      View Order Status
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* IF NOT SUBMITTED: SHOW ACTIVE DYNAMIC INVESTIGATION INTERVIEW */
+                <div>
+                  <div suppressHydrationWarning style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--s3)' }}>
+                    <span className={`intake-status-pill ${isInvestigationComplete ? 'ready' : ''}`}>
+                      {isInvestigationComplete ? '✓ Ready to Submit' : `Inquiry Turn ${intakeTranscript.length + 1} · Scenario Probe`}
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                      {intakeTranscript.length} question{intakeTranscript.length === 1 ? '' : 's'} answered
+                    </span>
+                  </div>
+
+                  {/* MULTI-TURN CHAT THREAD */}
+                  <div suppressHydrationWarning className="chat-thread" style={{ minHeight: '260px', maxHeight: '420px', marginTop: 'var(--s2)' }}>
+                    {/* Render Previous Turns */}
+                    {intakeTranscript.map((turn, idx) => (
+                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)', marginBottom: 'var(--s3)' }}>
+                        {/* Assistant Question Bubble */}
+                        <div className="chat-message assistant">
+                          <article className="chat-card-assistant" style={{ background: 'var(--white)', borderLeft: '3px solid var(--blue)' }}>
+                            <div suppressHydrationWarning className="chat-assistant-header">
+                              <div suppressHydrationWarning className="chat-assistant-meta">
+                                <Bot size={14} /> <strong>ParcelProof AI Investigator</strong>
+                                <small>· Question {idx + 1}</small>
+                              </div>
+                            </div>
+                            <div suppressHydrationWarning className="chat-answer-text">
+                              {turn.question}
+                            </div>
+                          </article>
                         </div>
-                        <div suppressHydrationWarning className="chat-answer-text">
-                          {msg.content}
-                        </div>
-                        {msg.sources && msg.sources.length > 0 && (
-                          <div suppressHydrationWarning style={{ borderTop: '1px solid var(--line)', paddingTop: 'var(--s2)', display: 'flex', alignItems: 'center', gap: 'var(--s2)', flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 'var(--xs)', color: 'var(--text-muted)' }}>Citations:</span>
-                            {msg.sources.map(srcId => (
-                              <button
-                                key={srcId}
-                                className="quick-chip"
-                                style={{ padding: '2px 8px', fontSize: '11px' }}
-                                onClick={() => handleCitationClick(srcId)}
-                              >
-                                <LockKeyhole size={11} /> {srcId}
-                              </button>
-                            ))}
+
+                        {/* Customer Answer Bubble */}
+                        <div className="chat-message user">
+                          <div className="chat-bubble-user">
+                            {turn.answer}
                           </div>
-                        )}
-                      </article>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Active Question from Assistant */}
+                    {currentInvestigatorQuestion && !isIntakeLoading && (
+                      <div className="chat-message assistant">
+                        <article className="chat-card-assistant" style={{ background: '#f8fafc', borderLeft: '4px solid var(--accent, #00688c)' }}>
+                          <div suppressHydrationWarning className="chat-assistant-header">
+                            <div suppressHydrationWarning className="chat-assistant-meta">
+                              <Bot size={16} style={{ color: 'var(--blue)' }} /> 
+                              <strong>ParcelProof AI Investigator</strong>
+                              <span className="badge warning" style={{ fontSize: '10px', padding: '1px 6px' }}>Current Question</span>
+                            </div>
+                          </div>
+                          <div suppressHydrationWarning className="chat-answer-text" style={{ fontSize: '14.5px', fontWeight: 500, color: 'var(--ink)' }}>
+                            {currentInvestigatorQuestion}
+                          </div>
+                        </article>
+                      </div>
                     )}
-                  </div>
-                ))}
 
-                {aiLoading && (
-                  <div suppressHydrationWarning className="chat-message assistant">
-                    <article className="chat-card-assistant" style={{ opacity: 0.85 }}>
-                      <div suppressHydrationWarning className="loading" style={{ padding: 'var(--s2) 0' }}>
-                        <RotateCw className="spin" size={16} /> Retrieving verified case evidence and generating grounded response…
+                    {isIntakeLoading && (
+                      <div suppressHydrationWarning className="chat-message assistant">
+                        <article className="chat-card-assistant" style={{ opacity: 0.85 }}>
+                          <div suppressHydrationWarning className="loading" style={{ padding: 'var(--s2) 0' }}>
+                            <RotateCw className="spin" size={16} /> Analyzing your response and determining next scenario probe…
+                          </div>
+                        </article>
                       </div>
-                    </article>
+                    )}
+                    <div ref={chatBottomRef} />
                   </div>
-                )}
-                <div ref={chatBottomRef} />
-              </div>
 
-              {/* CHAT INPUT FORM */}
-              <form
-                onSubmit={e => { e.preventDefault(); askCustomerAssistant(); }}
-                className="chat-input-wrapper"
-                style={{ marginTop: 'var(--s4)' }}
-              >
-                <input
-                  type="text"
-                  className="chat-input"
-                  placeholder="Type your question about your delivery dispute..."
-                  value={aiQuestion}
-                  onChange={e => setAiQuestion(e.target.value)}
-                  disabled={aiLoading}
-                />
-                <button type="submit" className="button primary" disabled={!aiQuestion.trim() || aiLoading}>
-                  <Send size={15} /> Ask
-                </button>
-              </form>
+                  {/* CHAT INPUT FORM */}
+                  <form
+                    onSubmit={handleSendIntakeAnswer}
+                    className="chat-input-wrapper"
+                    style={{ marginTop: 'var(--s3)' }}
+                  >
+                    <input
+                      type="text"
+                      className="chat-input"
+                      placeholder="Type your response to the question above..."
+                      value={customerAnswerInput}
+                      onChange={e => setCustomerAnswerInput(e.target.value)}
+                      disabled={isIntakeLoading || submittingReport}
+                    />
+                    <button
+                      type="submit"
+                      className="button primary"
+                      disabled={!customerAnswerInput.trim() || isIntakeLoading || submittingReport}
+                    >
+                      {isIntakeLoading ? <RotateCw className="spin" size={14} /> : <Send size={14} />} Reply
+                    </button>
+                  </form>
+
+                  {/* SUBMIT ACTIONS BAR */}
+                  <div suppressHydrationWarning className="intake-submit-bar">
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {intakeTranscript.length >= 1 && (
+                        <button
+                          type="button"
+                          className="quick-chip"
+                          onClick={() => handleSendIntakeAnswer(undefined, "I have provided all the information I have regarding this dispute.")}
+                          disabled={isIntakeLoading || submittingReport}
+                        >
+                          I have no further details to add
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="button primary"
+                      disabled={intakeTranscript.length === 0 || submittingReport || isIntakeLoading}
+                      onClick={handleSubmitIntakeResponses}
+                      style={{ background: isInvestigationComplete ? '#1a7a3e' : undefined }}
+                    >
+                      {submittingReport ? (
+                        <>
+                          <RotateCw className="spin" size={14} /> Submitting Responses...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle size={15} /> Submit Responses {intakeTranscript.length > 0 ? `(${intakeTranscript.length} answered)` : ''}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
@@ -785,77 +993,6 @@ export default function CustomerPortal() {
         </div>
       )}
 
-      {/* ADAPTIVE AI REFUND INTAKE & DISPUTE MODAL */}
-      {isCreatingDispute && (
-        <div suppressHydrationWarning className="modal-backdrop" onClick={() => setIsCreatingDispute(false)}>
-          <div suppressHydrationWarning className="modal-card" onClick={e => e.stopPropagation()}>
-            <div suppressHydrationWarning className="modal-header">
-              <div>
-                <span className="eyebrow"><Bot size={12} /> Adaptive AI Dispute Intake</span>
-                <h3>Report Delivery Problem · {disputeOrderId}</h3>
-              </div>
-              <button className="icon-button" onClick={() => setIsCreatingDispute(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateDispute}>
-              {intakeStep === 1 && (
-                <>
-                  <div suppressHydrationWarning className="form-group">
-                    <label>What happened with your package?</label>
-                    <select
-                      value={disputeCategory}
-                      onChange={e => setDisputeCategory(e.target.value as any)}
-                      className="portal-select"
-                    >
-                      <option value="not_received">Package marked delivered but not received</option>
-                      <option value="wrong_location">Wrong location (Building has no reception/doorway mismatch)</option>
-                      <option value="incorrect_photo">Delivery photo does not match my entrance</option>
-                      <option value="damaged">Package arrived damaged</option>
-                    </select>
-                  </div>
-
-                  <div suppressHydrationWarning className="form-group">
-                    <label>Did you check with neighbors, building manager, or porch area?</label>
-                    <select value={checkedNeighbors} onChange={e => setCheckedNeighbors(e.target.value)} className="portal-select">
-                      <option value="yes">Yes, checked all surrounding areas — nothing was delivered</option>
-                      <option value="no">Not yet</option>
-                    </select>
-                  </div>
-
-                  <div suppressHydrationWarning className="form-group">
-                    <label>Does the courier photo match your doorway or building entrance?</label>
-                    <select value={photoDisputed} onChange={e => setPhotoDisputed(e.target.value)} className="portal-select">
-                      <option value="yes">No, the photo shows a different building / reception area</option>
-                      <option value="no">Yes, photo matches</option>
-                    </select>
-                  </div>
-
-                  <div suppressHydrationWarning className="form-group">
-                    <label>Explain the details in your own words:</label>
-                    <textarea
-                      rows={3}
-                      required
-                      value={disputeDescription}
-                      onChange={e => setDisputeDescription(e.target.value)}
-                      placeholder="e.g. I was home during the delivery window and my building has no reception desk..."
-                    />
-                  </div>
-
-                  <div suppressHydrationWarning className="modal-actions">
-                    <button type="button" className="button secondary" onClick={() => setIsCreatingDispute(false)}>
-                      Cancel
-                    </button>
-                    <button type="submit" className="button primary" disabled={submittingDispute}>
-                      {submittingDispute ? 'Logging dispute…' : 'Submit Dispute for Investigation'}
-                    </button>
-                  </div>
-                </>
-              )}
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* EVIDENCE CITATION MODAL */}
       {activeSource && (

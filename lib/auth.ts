@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import type { User, UserRole } from './types';
-import { getOrder } from './db';
+import { getOrder, db } from './db';
 
 export const USERS: (User & { passwordHash: string })[] = [
   {
@@ -37,6 +37,24 @@ export const USERS: (User & { passwordHash: string })[] = [
     passwordHash: 'password123'
   },
   {
+    id: 'USR-COURIER-02',
+    email: 'rahul.courier@parcelproof.com',
+    name: 'Rahul Singh',
+    role: 'DELIVERY_AGENT',
+    accountId: null,
+    agentId: 'DEL-AGT-02',
+    passwordHash: 'password123'
+  },
+  {
+    id: 'USR-COURIER-03',
+    email: 'arjun.courier@parcelproof.com',
+    name: 'Arjun Rao',
+    role: 'DELIVERY_AGENT',
+    accountId: null,
+    agentId: 'DEL-AGT-03',
+    passwordHash: 'password123'
+  },
+  {
     id: 'USR-AGENT-01',
     email: 'priya@parcelproof.com',
     name: 'Priya Shah',
@@ -65,10 +83,52 @@ export const USERS: (User & { passwordHash: string })[] = [
 const AUTH_COOKIE = 'parcelproof_session';
 
 export function authenticateUser(email: string, password: string): User | null {
-  const user = USERS.find(u => u.email.toLowerCase() === email.toLowerCase().trim() && u.passwordHash === password);
-  if (!user) return null;
-  const { passwordHash: _, ...safeUser } = user;
-  return safeUser;
+  try {
+    const row = db().prepare('SELECT * FROM users WHERE email=? AND passwordHash=?').get(email.toLowerCase().trim(), password);
+    if (!row) return null;
+    const user = row as any;
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      accountId: user.accountId || null,
+      agentId: user.agentId || null
+    };
+  } catch (e) {
+    console.error('Error authenticating user', e);
+    return null;
+  }
+}
+
+export function registerUser(email: string, password: string, name: string, role: string): User | null {
+  try {
+    const id = `USR-${role.substring(0,4).toUpperCase()}-${Date.now()}`;
+    const accountId = role === 'CUSTOMER' ? `HH-${Math.floor(100 + Math.random() * 900)}` : null;
+    const agentId = role === 'DELIVERY_AGENT' ? `DEL-AGT-${Date.now().toString().slice(-4)}` : null;
+
+    db().prepare('INSERT INTO users VALUES(?,?,?,?,?,?,?)').run(
+      id,
+      email.toLowerCase().trim(),
+      name,
+      role,
+      accountId,
+      agentId,
+      password
+    );
+
+    return {
+      id,
+      email: email.toLowerCase().trim(),
+      name,
+      role: role as any,
+      accountId,
+      agentId
+    };
+  } catch (e) {
+    console.error('Registration failed:', e);
+    return null;
+  }
 }
 
 export function encodeSession(user: User): string {

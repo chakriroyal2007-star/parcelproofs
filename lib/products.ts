@@ -42,36 +42,3 @@ export const PRODUCTS: Product[] = [
     inStock: true
   }
 ];
-
-export const DELIVERY_AGENTS: DeliveryAgent[] = [
-  {
-    id: 'DEL-AGT-01',
-    name: 'Daniel Kumar',
-    email: 'courier@parcelproof.com',
-    phone: '+1 (555) 234-8901',
-    status: 'Available',
-    activeDeliveries: 1,
-    completedDeliveries: 42,
-    disputedDeliveries: 1
-  },
-  {
-    id: 'DEL-AGT-02',
-    name: 'Rahul Singh',
-    email: 'rahul.courier@parcelproof.com',
-    phone: '+1 (555) 876-4321',
-    status: 'On delivery',
-    activeDeliveries: 2,
-    completedDeliveries: 58,
-    disputedDeliveries: 2
-  },
-  {
-    id: 'DEL-AGT-03',
-    name: 'Arjun Rao',
-    email: 'arjun.courier@parcelproof.com',
-    phone: '+1 (555) 345-6789',
-    status: 'Available',
-    activeDeliveries: 0,
-    completedDeliveries: 31,
-    disputedDeliveries: 0
-  }
-];

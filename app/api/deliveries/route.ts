@@ -11,7 +11,7 @@ export async function GET() {
 
     if (user && user.role === 'DELIVERY_AGENT') {
       const agentDeliveries = all.filter(o => 
-        !o.deliveryAgentId || o.deliveryAgentId === user.agentId || o.deliveryAgentName === user.name
+        (o.deliveryAgentId && o.deliveryAgentId === user.agentId) || (o.deliveryAgentName && o.deliveryAgentName === user.name)
       );
       return Response.json({ deliveries: agentDeliveries });
     }

@@ -40,12 +40,12 @@ export default function OwnerPortal() {
 
   // Assignment state
   const [assigningOrder, setAssigningOrder] = useState<Order | null>(null);
-  const [selectedAgentId, setSelectedAgentId] = useState<string>('DEL-AGT-01');
+  const [selectedAgentId, setSelectedAgentId] = useState<string>('');
 
   // Decision state
   const [decisionReason, setDecisionReason] = useState('');
   const [requiredEvidence, setRequiredEvidence] = useState('');
-  const [decisionModal, setDecisionModal] = useState<'APPROVE_REFUND' | 'REJECT_REFUND' | 'REQUEST_MORE_EVIDENCE' | 'ESCALATE' | null>(null);
+  const [decisionModal, setDecisionModal] = useState<'FULL_REFUND' | 'REPLACEMENT' | 'HOLD' | 'ESCALATE' | null>(null);
 
   // Copilot Q&A
   const [copilotQuestion, setCopilotQuestion] = useState('');
@@ -147,8 +147,8 @@ export default function OwnerPortal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           decision: decisionModal,
-          reason: decisionReason || `Owner evaluated case evidence (Score: ${assessment?.score || 82}/100)`,
-          requiredEvidence: decisionModal === 'REQUEST_MORE_EVIDENCE' ? (requiredEvidence || 'Proof of residence / doorway photo') : null
+          reason: decisionReason || `Owner evaluated case evidence (Score: ${caseData?.intakeReport?.confidenceScore || 82}/100)`,
+          requiredEvidence: decisionModal === 'HOLD' ? (requiredEvidence || 'Pending further review') : null
         })
       });
       const data = await res.json();
@@ -316,7 +316,7 @@ export default function OwnerPortal() {
                               <td><small>{o.deliveryAddress || '404 Skyline Ave, Apt 12B, Seattle, WA'}</small></td>
                               <td>{o.currency} {o.amount.toFixed(2)}</td>
                               <td>
-                                <button className="button primary small" onClick={() => setAssigningOrder(o)}>
+                                <button className="button primary small" onClick={() => { setAssigningOrder(o); setSelectedAgentId(agents[0]?.id || ''); }}>
                                   <Truck size={13} /> Assign Courier
                                 </button>
                               </td>
@@ -383,87 +383,53 @@ export default function OwnerPortal() {
                       <p>Customer: <strong>{caseData.order.speaker}</strong> · Order Value: <strong>{caseData.order.currency} {caseData.order.amount.toFixed(2)}</strong></p>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <span className={`badge ${caseData.ownerDecision?.decision === 'APPROVE_REFUND' ? 'success' : 'warning'}`}>
+                      <span className={`badge ${caseData.ownerDecision?.decision === 'FULL_REFUND' ? 'success' : 'warning'}`}>
                         {caseData.ownerDecision ? `Decision: ${caseData.ownerDecision.decision.replaceAll('_', ' ')}` : 'Decision Pending'}
                       </span>
                     </div>
                   </div>
 
-                  {/* 82 / 100 EXPLAINABLE SCORE GAUGE */}
-                  <div suppressHydrationWarning className="score-hero-box" style={{ background: 'linear-gradient(135deg, rgba(0,104,140,0.06), rgba(34,126,158,0.12))', border: '1px solid rgba(0,104,140,0.3)', borderRadius: 'var(--rds-radius-lg)', padding: 'var(--s5)', margin: 'var(--s4) 0' }}>
-                    <div suppressHydrationWarning style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(0,104,140,0.2)', paddingBottom: 'var(--s3)' }}>
-                      <div>
-                        <span style={{ fontSize: 'var(--xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)' }}>
-                          Deterministic AI Refund Assessment
-                        </span>
-                        <h2 style={{ fontSize: 'var(--3xl)', margin: 'var(--s1) 0', color: 'var(--text)' }}>
-                          {assessment?.score || 82} <span style={{ fontSize: 'var(--base)', color: 'var(--text-muted)' }}>/ 100</span>
-                        </h2>
+                  {caseData.intakeReport ? (
+                    <div suppressHydrationWarning className="score-hero-box" style={{ background: 'linear-gradient(135deg, rgba(0,104,140,0.06), rgba(34,126,158,0.12))', border: '1px solid rgba(0,104,140,0.3)', borderRadius: 'var(--rds-radius-lg)', padding: 'var(--s5)', margin: 'var(--s4) 0' }}>
+                      <div suppressHydrationWarning style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(0,104,140,0.2)', paddingBottom: 'var(--s3)' }}>
+                        <div>
+                          <span style={{ fontSize: 'var(--xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)' }}>
+                            AI Assistant Intake Report
+                          </span>
+                          <h2 style={{ fontSize: 'var(--3xl)', margin: 'var(--s1) 0', color: 'var(--text)' }}>
+                            {caseData.intakeReport.confidenceScore} <span style={{ fontSize: 'var(--base)', color: 'var(--text-muted)' }}>/ 100</span>
+                          </h2>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span className={`badge ${caseData.intakeReport.confidenceLevel === 'HIGH' ? 'success' : 'warning'}`} style={{ fontSize: 'var(--sm)', padding: '6px 12px' }}>
+                            {caseData.intakeReport.confidenceLevel} Confidence
+                          </span>
+                          <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '4px' }}>Recommendation: {caseData.intakeReport.recommendedAction.replaceAll('_', ' ')}</small>
+                        </div>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <span className="badge success" style={{ fontSize: 'var(--sm)', padding: '6px 12px' }}>
-                          {assessment?.levelLabel || 'Strong evidence supporting refund review'}
-                        </span>
-                        <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '4px' }}>Deterministic Model v1.0</small>
-                      </div>
-                    </div>
 
-                    {/* TRANSPARENT SCORE FACTORS BREAKDOWN */}
-                    <div suppressHydrationWarning style={{ marginTop: 'var(--s4)' }}>
-                      <h4 style={{ fontSize: 'var(--xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)', marginBottom: 'var(--s3)' }}>
-                        Why this score? (Explainable Factor Breakdown):
-                      </h4>
-                      <div suppressHydrationWarning style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--s3)' }}>
-                        <div suppressHydrationWarning className="factor-pill" style={{ background: 'var(--bg-card)', padding: 'var(--s3)', borderRadius: 'var(--rds-radius-md)', border: '1px solid var(--line)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: 'var(--xs)' }}>
-                            <span>Customer Evidence Consistency</span>
-                            <strong style={{ color: '#436b1d' }}>+{assessment?.factors.customerEvidence || 18} / 20</strong>
-                          </div>
-                          <small style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{assessment?.factors.explanations.customerEvidence || 'Customer provided specific testimony & disputed location photo.'}</small>
-                        </div>
-
-                        <div suppressHydrationWarning className="factor-pill" style={{ background: 'var(--bg-card)', padding: 'var(--s3)', borderRadius: 'var(--rds-radius-md)', border: '1px solid var(--line)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: 'var(--xs)' }}>
-                            <span>Delivery Evidence Conflict</span>
-                            <strong style={{ color: '#436b1d' }}>+{assessment?.factors.deliveryConsistency || 17} / 20</strong>
-                          </div>
-                          <small style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{assessment?.factors.explanations.deliveryConsistency || 'Courier photo shows reception desk; customer building has no reception.'}</small>
-                        </div>
-
-                        <div suppressHydrationWarning className="factor-pill" style={{ background: 'var(--bg-card)', padding: 'var(--s3)', borderRadius: 'var(--rds-radius-md)', border: '1px solid var(--line)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: 'var(--xs)' }}>
-                            <span>Prior Support Commitments</span>
-                            <strong style={{ color: '#436b1d' }}>+{assessment?.factors.commitments || 15} / 15</strong>
-                          </div>
-                          <small style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{assessment?.factors.explanations.commitments || 'Agent promised refund within 24h in verified record [SUP-1042-01].'}</small>
-                        </div>
-
-                        <div suppressHydrationWarning className="factor-pill" style={{ background: 'var(--bg-card)', padding: 'var(--s3)', borderRadius: 'var(--rds-radius-md)', border: '1px solid var(--line)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: 'var(--xs)' }}>
-                            <span>Financial Ledger State</span>
-                            <strong style={{ color: '#436b1d' }}>+{assessment?.factors.financialHistory || 10} / 10</strong>
-                          </div>
-                          <small style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{assessment?.factors.explanations.financialHistory || 'Payment captured; refund ledger status is not_initiated [REF-PP-1042].'}</small>
-                        </div>
-
-                        <div suppressHydrationWarning className="factor-pill" style={{ background: 'var(--bg-card)', padding: 'var(--s3)', borderRadius: 'var(--rds-radius-md)', border: '1px solid var(--line)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: 'var(--xs)' }}>
-                            <span>Dispute Policy Eligibility</span>
-                            <strong style={{ color: '#436b1d' }}>+{assessment?.factors.policyEligibility || 10} / 10</strong>
-                          </div>
-                          <small style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{assessment?.factors.explanations.policyEligibility || 'Meets carrier non-receipt guidelines under regional policy [POL-US-2].'}</small>
-                        </div>
-
-                        <div suppressHydrationWarning className="factor-pill" style={{ background: 'var(--bg-card)', padding: 'var(--s3)', borderRadius: 'var(--rds-radius-md)', border: '1px solid var(--line)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: 'var(--xs)' }}>
-                            <span>Timeline & Reporting Window</span>
-                            <strong style={{ color: '#436b1d' }}>+{assessment?.factors.timelineConsistency || 8} / 10</strong>
-                          </div>
-                          <small style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{assessment?.factors.explanations.timelineConsistency || 'Dispute logged promptly within carrier investigation window.'}</small>
-                        </div>
+                      <div suppressHydrationWarning style={{ marginTop: 'var(--s4)' }}>
+                        <h4 style={{ fontSize: 'var(--xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)', marginBottom: 'var(--s3)' }}>
+                          Executive Summary:
+                        </h4>
+                        <p style={{ fontSize: 'var(--sm)', color: 'var(--text)' }}>
+                          {caseData.intakeReport.executiveSummary}
+                        </p>
+                        
+                        <h4 style={{ fontSize: 'var(--xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)', marginBottom: 'var(--s2)', marginTop: 'var(--s4)' }}>
+                          Extracted Facts & Analysis:
+                        </h4>
+                        <ul style={{ margin: 'var(--s2) 0 0', paddingLeft: 'var(--s4)', fontSize: 'var(--xs)', color: 'var(--text)' }}>
+                          {caseData.intakeReport.extractedFacts.map((f, i) => <li key={i}>{f}</li>)}
+                          {caseData.intakeReport.detectedContradictions.map((c, i) => <li key={`c-${i}`} style={{ color: '#b3311f' }}>Conflict: {c}</li>)}
+                        </ul>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div suppressHydrationWarning className="score-hero-box" style={{ background: 'var(--bg-card)', border: '1px solid var(--line)', borderRadius: 'var(--rds-radius-lg)', padding: 'var(--s5)', margin: 'var(--s4) 0', textAlign: 'center' }}>
+                      <p style={{ color: 'var(--text-muted)' }}>No Customer AI Intake Report generated yet.</p>
+                    </div>
+                  )}
 
                   {/* EVIDENCE RECONCILIATION CARDS */}
                   <div suppressHydrationWarning style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s4)', margin: 'var(--s6) 0' }}>
@@ -500,89 +466,26 @@ export default function OwnerPortal() {
                     <div suppressHydrationWarning style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
                       <button 
                         className="button primary" 
-                        onClick={() => setDecisionModal('APPROVE_REFUND')}
+                        onClick={() => setDecisionModal('FULL_REFUND')}
                         disabled={caseData.refund.status === 'initiated'}
                       >
-                        <Check size={16} /> {caseData.refund.status === 'initiated' ? 'Refund Already Approved' : 'Approve Simulated Refund'}
+                        <Check size={16} /> {caseData.refund.status === 'initiated' ? 'Refund Already Approved' : 'Issue Full Refund'}
                       </button>
-                      <button className="button secondary" onClick={() => setDecisionModal('REQUEST_MORE_EVIDENCE')}>
-                        <ClipboardList size={16} /> Request More Evidence
+                      <button className="button secondary" onClick={() => setDecisionModal('REPLACEMENT')}>
+                        <Package size={16} /> Issue Replacement
+                      </button>
+                      <button className="button secondary" onClick={() => setDecisionModal('HOLD')}>
+                        <ClipboardList size={16} /> Hold For Investigation
                       </button>
                       <button className="button secondary" onClick={() => setDecisionModal('ESCALATE')}>
                         <AlertTriangle size={16} /> Escalate to Executive Review
-                      </button>
-                      <button className="button secondary" onClick={() => setDecisionModal('REJECT_REFUND')}>
-                        <X size={16} /> Reject Refund
                       </button>
                     </div>
                   </div>
                 </section>
               </div>
 
-              {/* SIDEBAR: OWNER AI COPILOT */}
-              <aside suppressHydrationWarning className="portal-sidebar">
-                <div suppressHydrationWarning className="portal-card">
-                  <div suppressHydrationWarning className="section-title">
-                    <div>
-                      <h3>Owner Copilot Q&A</h3>
-                      <p>Ask anything about this case's evidence or scoring.</p>
-                    </div>
-                    <Bot size={20} className="text-accent" />
-                  </div>
 
-                  <div suppressHydrationWarning className="quick-actions-bar" style={{ margin: 'var(--s3) 0' }}>
-                    <div suppressHydrationWarning className="quick-actions-chips">
-                      <button className="quick-chip" onClick={() => askOwnerCopilot("Why did the assessment assign 82 / 100?")}>
-                        Why 82 score?
-                      </button>
-                      <button className="quick-chip" onClick={() => askOwnerCopilot("What evidence conflicts between courier and customer?")}>
-                        Evidence conflicts?
-                      </button>
-                      <button className="quick-chip" onClick={() => askOwnerCopilot("What should I verify before approving?")}>
-                        What to verify?
-                      </button>
-                    </div>
-                  </div>
-
-                  {copilotLoading && (
-                    <div suppressHydrationWarning className="loading" style={{ margin: 'var(--s4) 0' }}>
-                      <RotateCw className="spin" size={16} /> Consulting grounded case evidence…
-                    </div>
-                  )}
-
-                  {copilotAnswer && (
-                    <article className="chat-card-assistant" style={{ margin: 'var(--s4) 0' }}>
-                      <div suppressHydrationWarning className="chat-assistant-header">
-                        <div suppressHydrationWarning className="chat-assistant-meta">
-                          <Bot size={14} /> <strong>Operations Copilot</strong>
-                        </div>
-                        <span className="badge success">Grounded</span>
-                      </div>
-                      <div suppressHydrationWarning className="chat-answer-text">
-                        {copilotAnswer}
-                      </div>
-                    </article>
-                  )}
-
-                  <form
-                    onSubmit={e => { e.preventDefault(); askOwnerCopilot(); }}
-                    className="chat-input-wrapper"
-                    style={{ marginTop: 'var(--s3)' }}
-                  >
-                    <input
-                      type="text"
-                      className="chat-input"
-                      placeholder="Ask owner copilot..."
-                      value={copilotQuestion}
-                      onChange={e => setCopilotQuestion(e.target.value)}
-                      disabled={copilotLoading}
-                    />
-                    <button type="submit" className="button primary" disabled={!copilotQuestion.trim() || copilotLoading}>
-                      <Send size={14} />
-                    </button>
-                  </form>
-                </div>
-              </aside>
             </div>
           )}
 
@@ -626,7 +529,7 @@ export default function OwnerPortal() {
                         </td>
                         <td>
                           {!o.deliveryAgentId ? (
-                            <button className="button primary small" onClick={() => setAssigningOrder(o)}>
+                            <button className="button primary small" onClick={() => { setAssigningOrder(o); setSelectedAgentId(agents[0]?.id || ''); }}>
                               Assign Courier
                             </button>
                           ) : (
@@ -782,15 +685,15 @@ export default function OwnerPortal() {
                 />
               </div>
 
-              {decisionModal === 'REQUEST_MORE_EVIDENCE' && (
+              {decisionModal === 'HOLD' && (
                 <div suppressHydrationWarning className="form-group">
-                  <label>Specific Evidence Required from Customer</label>
+                  <label>Specific Evidence Required</label>
                   <input
                     type="text"
                     required
                     value={requiredEvidence}
                     onChange={e => setRequiredEvidence(e.target.value)}
-                    placeholder="e.g. Photo of apartment entrance / building directory"
+                    placeholder="e.g. Need CCTV footage from carrier"
                   />
                 </div>
               )}

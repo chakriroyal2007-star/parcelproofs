@@ -254,7 +254,7 @@ export type RefundAssessment = {
   sources: string[];
 };
 
-export type OwnerDecisionType = 'APPROVE_REFUND' | 'REJECT_REFUND' | 'REQUEST_MORE_EVIDENCE' | 'ESCALATE';
+export type OwnerDecisionType = 'FULL_REFUND' | 'REPLACEMENT' | 'HOLD' | 'ESCALATE';
 
 export type OwnerDecision = {
   decisionId: string;
@@ -308,6 +308,7 @@ export type CaseData = {
   assessment?: RefundAssessment | null;
   ownerDecision?: OwnerDecision | null;
   timeline?: TimelineEvent[];
+  intakeReport?: AdminIntakeReport | null;
   draft: string; 
   activeAgent: string; 
   mode: 'fixture'|'live'; 
@@ -344,4 +345,45 @@ export type CustomerAIAnswer = {
   authorizedForCustomer: boolean;
   conflicts?: string[];
   missingInformation?: string[];
+};
+
+export type IntakeTranscriptItem = {
+  question: string;
+  answer: string;
+  timestamp: string;
+};
+
+export type AdminIntakeReport = {
+  reportId: string;
+  caseId: string;
+  orderItem: string;
+  orderAmount: number;
+  currency: string;
+  customerName: string;
+  accountId: string;
+  timestamp: string;
+  confidenceScore: number; // 0 - 100
+  confidenceLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+  confidenceBreakdown: {
+    evidenceConsistency: number;
+    courierConflictIndex: number;
+    plausibilityScore: number;
+  };
+  executiveSummary: string;
+  disputeCategory: string;
+  extractedFacts: string[];
+  detectedContradictions: string[];
+  courierTelemetryEvaluation: string;
+  recommendedAction: 'FULL_REFUND' | 'REPLACEMENT' | 'COURIER_INVESTIGATION' | 'IN_PERSON_INSPECTION' | 'DENIAL';
+  actionRationale: string;
+  questionsAskedCount: number;
+  interviewTranscript: IntakeTranscriptItem[];
+  status: 'SUBMITTED' | 'UNDER_REVIEW' | 'PROCESSED';
+};
+
+export type IntakeChatResponse = {
+  reply: string;
+  isInvestigationComplete: boolean;
+  questionNumber: number;
+  status: 'in_progress' | 'ready_to_submit';
 };

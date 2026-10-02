@@ -15,7 +15,8 @@ import type {
   Commitment, 
   RiskSignal, 
   AIChatMessage, 
-  NextAgentBrief 
+  NextAgentBrief,
+  AdminIntakeReport 
 } from './types';
 
 let connection: DatabaseSync | undefined;
@@ -67,10 +68,20 @@ export function db() {
   CREATE TABLE IF NOT EXISTS refund_assessments(assessmentId TEXT PRIMARY KEY, orderId TEXT REFERENCES orders(id), score INTEGER NOT NULL, level TEXT NOT NULL, data TEXT NOT NULL, calculatedAt TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS refund_assessment_history(id TEXT PRIMARY KEY, orderId TEXT REFERENCES orders(id), assessmentId TEXT, score INTEGER NOT NULL, reason TEXT, calculatedAt TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS owner_decisions(decisionId TEXT PRIMARY KEY, orderId TEXT REFERENCES orders(id), decision TEXT NOT NULL, reason TEXT NOT NULL, requiredEvidence TEXT, ownerName TEXT NOT NULL, timestamp TEXT NOT NULL, scoreSnapshot INTEGER NOT NULL, status TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS customer_intake_reports(reportId TEXT PRIMARY KEY, orderId TEXT NOT NULL, data TEXT NOT NULL, submittedAt TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, accountId TEXT, agentId TEXT, passwordHash TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS partial_intake_transcripts(orderId TEXT PRIMARY KEY REFERENCES orders(id), data TEXT NOT NULL);
   CREATE UNIQUE INDEX IF NOT EXISTS one_refund_per_order ON audits(orderId) WHERE kind='initiate_refund';`);
 
   if (!(connection.prepare('SELECT count(*) as n FROM orders').get() as { n: number }).n) {
     seed(connection);
+  }
+  if (!(connection.prepare('SELECT count(*) as n FROM users').get() as { n: number }).n) {
+    const { USERS } = require('./auth');
+    const insertUser = connection.prepare('INSERT OR IGNORE INTO users VALUES(?,?,?,?,?,?,?)');
+    for (const u of USERS) {
+      insertUser.run(u.id, u.email.toLowerCase(), u.name, u.role, u.accountId || null, (u as any).agentId || null, u.passwordHash);
+    }
   }
   return connection;
 }
@@ -583,11 +594,39 @@ export function getCase(id: string): CaseData {
     assessment: getRefundAssessment(id),
     ownerDecision: getOwnerDecision(id),
     timeline: getTimeline(id),
+    intakeReport: getCustomerIntakeReport(id),
     draft: (d?.text as string) || '',
     activeAgent,
     mode: mode(),
     now: now()
   };
+}
+
+export function saveCustomerIntakeReport(report: AdminIntakeReport): void {
+  db().prepare(`
+    INSERT INTO customer_intake_reports(reportId, orderId, data, submittedAt)
+    VALUES(?, ?, ?, ?)
+    ON CONFLICT(reportId) DO UPDATE SET data=excluded.data, submittedAt=excluded.submittedAt
+  `).run(report.reportId, report.caseId, JSON.stringify(report), report.timestamp);
+}
+
+export function getCustomerIntakeReport(orderId: string): AdminIntakeReport | null {
+  try {
+    const row = db().prepare('SELECT data FROM customer_intake_reports WHERE orderId=? ORDER BY submittedAt DESC LIMIT 1').get(orderId) as { data: string } | undefined;
+    if (!row) return null;
+    return JSON.parse(row.data) as AdminIntakeReport;
+  } catch {
+    return null;
+  }
+}
+
+export function listAllCustomerIntakeReports(): AdminIntakeReport[] {
+  try {
+    const rows = db().prepare('SELECT data FROM customer_intake_reports ORDER BY submittedAt DESC').all() as { data: string }[];
+    return rows.map(r => JSON.parse(r.data) as AdminIntakeReport);
+  } catch {
+    return [];
+  }
 }
 
 export function listOrdersForAccount(accountId: string): Order[] {
@@ -775,7 +814,8 @@ export function getAdminOverview() {
     evidenceConflicts,
     initiatedRefunds,
     recentAudits: allAudits,
-    recentAIAudits: aiAudits
+    recentAIAudits: aiAudits,
+    intakeReports: listAllCustomerIntakeReports()
   };
 }
 
@@ -821,7 +861,7 @@ export function assignAgentToCase(orderId: string, agentName: string) {
 // ORDER LIFECYCLE & DELIVERY WORKFLOW ENGINE
 // ==========================================
 
-import { PRODUCTS, DELIVERY_AGENTS } from './products';
+import { PRODUCTS } from './products';
 import type { 
   DeliveryStatus, 
   DeliveryProof, 
@@ -841,11 +881,19 @@ export function listProducts(): Product[] {
 export function listDeliveryAgents(): DeliveryAgent[] {
   const c = db();
   const allOrders = listOrders();
-  return DELIVERY_AGENTS.map(ag => {
-    const active = allOrders.filter(o => o.deliveryAgentId === ag.id && !['DELIVERED', 'DELIVERY_CONFIRMED'].includes(o.deliveryStatus || '')).length;
+  const users = c.prepare("SELECT id, name, email FROM users WHERE role='DELIVERY_AGENT'").all() as {id: string, name: string, email: string}[];
+  
+  return users.map(u => {
+    const active = allOrders.filter(o => o.deliveryAgentId === u.id && !['DELIVERED', 'DELIVERY_CONFIRMED'].includes(o.deliveryStatus || '')).length;
     return {
-      ...ag,
-      activeDeliveries: active
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      phone: 'N/A',
+      status: active > 0 ? 'On delivery' : 'Available',
+      activeDeliveries: active,
+      completedDeliveries: allOrders.filter(o => o.deliveryAgentId === u.id && ['DELIVERED', 'DELIVERY_CONFIRMED'].includes(o.deliveryStatus || '')).length,
+      disputedDeliveries: 0
     };
   });
 }
@@ -942,12 +990,14 @@ export function placeCustomerOrder(input: {
 export function assignDeliveryAgent(orderId: string, agentId: string, assignedBy: string): Order {
   const c = db();
   const order = getOrder(orderId);
-  const agent = DELIVERY_AGENTS.find(a => a.id === agentId) || DELIVERY_AGENTS[0];
-
-  order.deliveryAgentId = agent.id;
-  order.deliveryAgentName = agent.name;
+  
+  const userRow = c.prepare("SELECT id, name FROM users WHERE id=?").get(agentId) as {id: string, name: string} | undefined;
+  if (!userRow) throw new Error("Agent not found");
+  
+  order.deliveryAgentId = userRow.id;
+  order.deliveryAgentName = userRow.name;
   order.deliveryStatus = 'ASSIGNED';
-  order.status = `Assigned to courier ${agent.name}`;
+  order.status = `Assigned to courier ${userRow.name}`;
   order.assignedAt = new Date().toISOString();
 
   c.exec('BEGIN IMMEDIATE');
@@ -959,8 +1009,8 @@ export function assignDeliveryAgent(orderId: string, agentId: string, assignedBy
       eventId,
       orderId,
       'ASSIGNED',
-      agent.id,
-      agent.name,
+      userRow.id,
+      userRow.name,
       order.assignedAt,
       `Assigned by operations owner ${assignedBy}`,
       null
@@ -972,7 +1022,7 @@ export function assignDeliveryAgent(orderId: string, agentId: string, assignedBy
       assignedBy,
       'assign_delivery_agent',
       order.assignedAt,
-      `Assigned delivery agent ${agent.name} (${agent.id}) to order ${order.id}`,
+      `Assigned delivery agent ${userRow.name} (${userRow.id}) to order ${order.id}`,
       `assign_${order.id}_${Date.now()}`
     );
 
@@ -1424,3 +1474,18 @@ export function getTimeline(orderId: string): TimelineEvent[] {
 
   return events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 }
+
+export function getPartialIntakeTranscript(orderId: string): IntakeTranscriptItem[] {
+  const row = db().prepare('SELECT data FROM partial_intake_transcripts WHERE orderId=?').get(orderId) as any;
+  if (!row) return [];
+  return JSON.parse(row.data);
+}
+
+export function savePartialIntakeTranscript(orderId: string, transcript: IntakeTranscriptItem[]): void {
+  db().prepare('INSERT OR REPLACE INTO partial_intake_transcripts VALUES(?,?)').run(orderId, JSON.stringify(transcript));
+}
+
+export function clearPartialIntakeTranscript(orderId: string): void {
+  db().prepare('DELETE FROM partial_intake_transcripts WHERE orderId=?').run(orderId);
+}
+

@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
 
 const decisionSchema = z.object({
-  decision: z.enum(['APPROVE_REFUND', 'REJECT_REFUND', 'REQUEST_MORE_EVIDENCE', 'ESCALATE']),
+  decision: z.enum(['FULL_REFUND', 'REPLACEMENT', 'HOLD', 'ESCALATE']),
   reason: z.string().min(3),
   requiredEvidence: z.string().nullable().optional()
 });

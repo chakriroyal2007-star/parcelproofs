@@ -10,17 +10,26 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function handleLogin(e?: React.FormEvent, customEmail?: string) {
+  const [mode, setMode] = useState<'login'|'register'>('login');
+  const [name, setName] = useState('');
+  const [role, setRole] = useState('CUSTOMER');
+
+  async function handleSubmit(e?: React.FormEvent, customEmail?: string) {
     if (e) e.preventDefault();
-    const loginEmail = customEmail || email;
+    const submitEmail = customEmail || email;
     setLoading(true);
     setError('');
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
+      const payload = mode === 'register' 
+        ? { email: submitEmail, password, name, role } 
+        : { email: submitEmail, password };
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Login failed');
@@ -37,15 +46,16 @@ export default function LoginPage() {
         router.push('/agent');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid login credentials');
+      setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setLoading(false);
     }
   }
 
   function quickLogin(demoEmail: string) {
+    setMode('login');
     setEmail(demoEmail);
-    handleLogin(undefined, demoEmail);
+    handleSubmit(undefined, demoEmail);
   }
 
   return (
@@ -68,7 +78,24 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form suppressHydrationWarning onSubmit={handleLogin} className="login-form">
+        <form suppressHydrationWarning onSubmit={handleSubmit} className="login-form">
+          {mode === 'register' && (
+            <div suppressHydrationWarning className="form-group">
+              <label htmlFor="name">Full Name</label>
+              <div suppressHydrationWarning className="input-with-icon">
+                <User size={16} />
+                <input
+                  id="name"
+                  type="text"
+                  required
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="John Doe"
+                />
+              </div>
+            </div>
+          )}
+
           <div suppressHydrationWarning className="form-group">
             <label htmlFor="email">Work Email / Customer Account</label>
             <div suppressHydrationWarning className="input-with-icon">
@@ -99,9 +126,36 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {mode === 'register' && (
+            <div suppressHydrationWarning className="form-group">
+              <label htmlFor="role">Account Role</label>
+              <select 
+                id="role" 
+                value={role} 
+                onChange={e => setRole(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}
+              >
+                <option value="CUSTOMER">Customer</option>
+                <option value="DELIVERY_AGENT">Delivery Agent</option>
+                <option value="OWNER">Owner / Operations</option>
+                <option value="ADMIN">Administrator</option>
+              </select>
+            </div>
+          )}
+
           <button type="submit" className="button primary full" disabled={loading}>
-            {loading ? 'Authenticating…' : 'Sign in to ParcelProof'} <ArrowRight size={16} />
+            {loading ? 'Authenticating…' : (mode === 'register' ? 'Create Account' : 'Sign in to ParcelProof')} <ArrowRight size={16} />
           </button>
+
+          <div style={{ textAlign: 'center', marginTop: '16px' }}>
+            <button 
+              type="button" 
+              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+              style={{ background: 'none', border: 'none', color: 'var(--brand-teal)', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              {mode === 'login' ? "Don't have an account? Register" : "Already have an account? Sign in"}
+            </button>
+          </div>
         </form>
 
         <div suppressHydrationWarning className="demo-accounts-box" style={{ marginTop: 'var(--s4)', padding: 'var(--s4)', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }}>
@@ -127,7 +181,21 @@ export default function LoginPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3b82f6' }}>
                 <Truck size={14} /> <strong>Delivery Agent</strong>
               </div>
-              <small style={{ color: 'var(--text-dim)', display: 'block', marginTop: 2 }}>Daniel Kumar (Proof & Dropoff)</small>
+              <small style={{ color: 'var(--text-dim)', display: 'block', marginTop: 2 }}>Daniel Kumar</small>
+            </button>
+
+            <button type="button" onClick={() => quickLogin('rahul.courier@parcelproof.com')} className="demo-btn" style={{ textAlign: 'left', padding: 'var(--s3)', borderRadius: 'var(--r-sm)', background: 'var(--surface-card)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3b82f6' }}>
+                <Truck size={14} /> <strong>Delivery Agent</strong>
+              </div>
+              <small style={{ color: 'var(--text-dim)', display: 'block', marginTop: 2 }}>Rahul Singh</small>
+            </button>
+
+            <button type="button" onClick={() => quickLogin('arjun.courier@parcelproof.com')} className="demo-btn" style={{ textAlign: 'left', padding: 'var(--s3)', borderRadius: 'var(--r-sm)', background: 'var(--surface-card)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#3b82f6' }}>
+                <Truck size={14} /> <strong>Delivery Agent</strong>
+              </div>
+              <small style={{ color: 'var(--text-dim)', display: 'block', marginTop: 2 }}>Arjun Rao</small>
             </button>
 
             <button type="button" onClick={() => quickLogin('priya@parcelproof.com')} className="demo-btn" style={{ textAlign: 'left', padding: 'var(--s3)', borderRadius: 'var(--r-sm)', background: 'var(--surface-card)', border: '1px solid var(--border)', cursor: 'pointer' }}>
