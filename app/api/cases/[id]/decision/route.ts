@@ -9,9 +9,8 @@ export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
 
 const decisionSchema = z.object({
-  decision: z.enum(['FULL_REFUND', 'REPLACEMENT', 'HOLD', 'ESCALATE']),
+  decision: z.enum(['FULL_REFUND', 'REPLACEMENT', 'REJECT']),
   reason: z.string().min(3),
-  requiredEvidence: z.string().nullable().optional()
 });
 
 export async function POST(req: Request, ctx: Context) {

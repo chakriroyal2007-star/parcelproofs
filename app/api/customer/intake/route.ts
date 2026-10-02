@@ -47,7 +47,7 @@ export async function GET(req: Request) {
       submittedAt: existing?.timestamp || null,
       caseId,
       transcript: partialTranscript,
-      openingQuestion: partialTranscript.length === 0 ? IntakeService.getOpeningQuestion(caseId, 'Customer') : null
+      openingQuestion: partialTranscript.length === 0 ? await IntakeService.getOpeningQuestion(caseId, 'Customer') : null
     });
   } catch {
     return Response.json({ error: 'Failed to check intake status' }, { status: 500 });
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
         });
       }
 
-      const openingQuestion = IntakeService.getOpeningQuestion(body.caseId, user.name);
+      const openingQuestion = await IntakeService.getOpeningQuestion(body.caseId, user.name);
       return Response.json({
         isSubmitted: false,
         openingQuestion,

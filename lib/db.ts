@@ -1329,21 +1329,18 @@ export function recordOwnerDecision(
   const timestamp = new Date().toISOString();
 
   let status: 'COMPLETED' | 'PENDING_INFO' | 'ESCALATED' | 'REJECTED' = 'COMPLETED';
-  if (decision === 'APPROVE_REFUND') {
+  if (decision === 'FULL_REFUND') {
     status = 'COMPLETED';
     order.status = 'Refund Approved';
     // Update refund ledger
     const actionId = `ACT-REF-${Date.now()}`;
     c.prepare('INSERT OR REPLACE INTO refunds VALUES(?,?,?,?)').run(orderId, 'initiated', actionId, timestamp);
-  } else if (decision === 'REJECT_REFUND') {
+  } else if (decision === 'REPLACEMENT') {
+    status = 'COMPLETED';
+    order.status = 'Replacement Approved';
+  } else if (decision === 'REJECT') {
     status = 'REJECTED';
     order.status = 'Dispute Closed · Refund Rejected';
-  } else if (decision === 'REQUEST_MORE_EVIDENCE') {
-    status = 'PENDING_INFO';
-    order.status = 'Awaiting Customer Evidence';
-  } else if (decision === 'ESCALATE') {
-    status = 'ESCALATED';
-    order.status = 'Escalated for Executive Review';
   }
 
   c.exec('BEGIN IMMEDIATE');
@@ -1468,7 +1465,7 @@ export function getTimeline(orderId: string): TimelineEvent[] {
       actor: decision.ownerName,
       actorRole: 'Operations Owner',
       description: `Decision: ${decision.decision}. Reason: ${decision.reason} (Score: ${decision.scoreSnapshot}/100)`,
-      badgeType: decision.decision === 'APPROVE_REFUND' ? 'success' : 'warning'
+      badgeType: decision.decision === 'FULL_REFUND' || decision.decision === 'REPLACEMENT' ? 'success' : 'warning'
     });
   }
 

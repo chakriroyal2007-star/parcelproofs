@@ -254,7 +254,7 @@ export type RefundAssessment = {
   sources: string[];
 };
 
-export type OwnerDecisionType = 'FULL_REFUND' | 'REPLACEMENT' | 'HOLD' | 'ESCALATE';
+export type OwnerDecisionType = 'FULL_REFUND' | 'REPLACEMENT' | 'REJECT';
 
 export type OwnerDecision = {
   decisionId: string;

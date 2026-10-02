@@ -45,7 +45,7 @@ export default function OwnerPortal() {
   // Decision state
   const [decisionReason, setDecisionReason] = useState('');
   const [requiredEvidence, setRequiredEvidence] = useState('');
-  const [decisionModal, setDecisionModal] = useState<'FULL_REFUND' | 'REPLACEMENT' | 'HOLD' | 'ESCALATE' | null>(null);
+  const [decisionModal, setDecisionModal] = useState<'FULL_REFUND' | 'REPLACEMENT' | 'REJECT' | null>(null);
 
   // Copilot Q&A
   const [copilotQuestion, setCopilotQuestion] = useState('');
@@ -147,8 +147,7 @@ export default function OwnerPortal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           decision: decisionModal,
-          reason: decisionReason || `Owner evaluated case evidence (Score: ${caseData?.intakeReport?.confidenceScore || 82}/100)`,
-          requiredEvidence: decisionModal === 'HOLD' ? (requiredEvidence || 'Pending further review') : null
+          reason: decisionReason || `Owner evaluated case evidence (Score: ${caseData?.intakeReport?.confidenceScore || 82}/100)`
         })
       });
       const data = await res.json();
@@ -474,11 +473,8 @@ export default function OwnerPortal() {
                       <button className="button secondary" onClick={() => setDecisionModal('REPLACEMENT')}>
                         <Package size={16} /> Issue Replacement
                       </button>
-                      <button className="button secondary" onClick={() => setDecisionModal('HOLD')}>
-                        <ClipboardList size={16} /> Hold For Investigation
-                      </button>
-                      <button className="button secondary" onClick={() => setDecisionModal('ESCALATE')}>
-                        <AlertTriangle size={16} /> Escalate to Executive Review
+                      <button className="button secondary" onClick={() => setDecisionModal('REJECT')}>
+                        <AlertTriangle size={16} /> Reject Request
                       </button>
                     </div>
                   </div>
@@ -685,18 +681,7 @@ export default function OwnerPortal() {
                 />
               </div>
 
-              {decisionModal === 'HOLD' && (
-                <div suppressHydrationWarning className="form-group">
-                  <label>Specific Evidence Required</label>
-                  <input
-                    type="text"
-                    required
-                    value={requiredEvidence}
-                    onChange={e => setRequiredEvidence(e.target.value)}
-                    placeholder="e.g. Need CCTV footage from carrier"
-                  />
-                </div>
-              )}
+
 
               <div suppressHydrationWarning className="modal-actions">
                 <button type="button" className="button secondary" onClick={() => setDecisionModal(null)}>
